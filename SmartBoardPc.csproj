@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <SelfContained>true</SelfContained>
+    <ApplicationIcon>smartboard.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="SmartboardPC.cs" />
+  </ItemGroup>
+</Project>
