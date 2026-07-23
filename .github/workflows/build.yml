@@ -1,0 +1,29 @@
+name: Build Native AOT Executable
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET 8 SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Build Native AOT Single File
+      run: |
+        dotnet publish SmartboardPC.csproj -c Release -r win-x64 -p:PublishAot=true --self-contained true
+
+    - name: Upload Executable Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SmartboardPC-Win64
+        path: bin/Release/net8.0-windows/win-x64/publish/
