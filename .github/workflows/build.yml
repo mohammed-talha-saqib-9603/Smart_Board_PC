@@ -1,4 +1,4 @@
-name: Build Native AOT Executable
+name: Build Single File Executable
 
 on:
   push:
@@ -18,9 +18,9 @@ jobs:
       with:
         dotnet-version: '8.0.x'
 
-    - name: Build Native AOT Single File
+    - name: Build Single File Executable
       run: |
-        dotnet publish SmartboardPC.csproj -c Release -r win-x64 -p:PublishAot=true --self-contained true
+        dotnet publish SmartboardPC.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 
     - name: Upload Executable Artifact
       uses: actions/upload-artifact@v4
