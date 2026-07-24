@@ -1,29 +1,58 @@
-name: Build Single File Executable
+name: Build SmartBoard
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
-
+    
     steps:
-    - name: Checkout repository
+    - name: Checkout code
       uses: actions/checkout@v4
-
-    - name: Setup .NET 8 SDK
+    
+    - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
-
-    - name: Build Single File Executable
+    
+    - name: Restore dependencies
+      run: dotnet restore
+    
+    - name: Build
+      run: dotnet build -c Release --no-restore
+    
+    - name: Publish Native AOT
       run: |
-        dotnet publish SmartboardPC.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
-
-    - name: Upload Executable Artifact
+        dotnet publish -c Release -r win-x64 `
+          -p:PublishAot=true `
+          -p:SelfContained=true `
+          -p:PublishSingleFile=true `
+          -p:PublishTrimmed=false `
+          -p:PublishReadyToRun=false `
+          -p:DebugType=embedded `
+          -p:DebugSymbols=true `
+          --no-build `
+          --output ./publish
+      continue-on-error: false
+    
+    - name: List output files (for debugging)
+      run: dir ./publish
+    
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: SmartboardPC-Win64
-        path: bin/Release/net8.0-windows/win-x64/publish/
+        name: SmartBoard
+        path: ./publish/SmartBoard.exe
+        retention-days: 30
+    
+    - name: Upload all publish files (for debugging)
+      uses: actions/upload-artifact@v4
+      with:
+        name: SmartBoard-publish-files
+        path: ./publish/
+        retention-days: 7

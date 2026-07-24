@@ -1,19 +1,16 @@
 // ==============================================================================
-// SMARTBOARD PC - C# NATIVE AOT VERSION (COMPLETE)
+// SMARTBOARD PC - C# NATIVE AOT VERSION (COMPLETE & FIXED)
 // ==============================================================================
 
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace SmartboardPC
@@ -38,7 +35,6 @@ namespace SmartboardPC
     {
         private const int PC_LISTEN_PORT = 5005;
         private const int PHONE_LISTEN_PORT = 5006;
-        private const int MAX_UDP_PACKET_SIZE = 4096;
 
         private UdpClient? udpClient;
         private Thread? receiveThread;
@@ -76,11 +72,11 @@ namespace SmartboardPC
                 receiveThread.IsBackground = true;
                 receiveThread.Start();
 
-                Console.WriteLine($"[Network] Listening on port {PC_LISTEN_PORT}");
+                System.Diagnostics.Debug.WriteLine($"[Network] Listening on port {PC_LISTEN_PORT}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Network] Error starting: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[Network] Error starting: {ex.Message}");
             }
         }
 
@@ -116,7 +112,7 @@ namespace SmartboardPC
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Network] Receive error: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"[Network] Receive error: {ex.Message}");
                 }
             }
         }
@@ -139,14 +135,13 @@ namespace SmartboardPC
 
                     if (isNew)
                     {
-                        Console.WriteLine($"[Network] Phone (re)connected from {ip}:{port}");
+                        System.Diagnostics.Debug.WriteLine($"[Network] Phone (re)connected from {ip}:{port}");
                         PhoneConnected?.Invoke(ip);
                     }
                     HelloReceived?.Invoke();
                     return;
                 }
 
-                // If no phone registered, adopt sender
                 if (PhoneIp == null)
                 {
                     PhoneIp = ip;
@@ -156,7 +151,7 @@ namespace SmartboardPC
                 }
                 else if (PhoneIp != ip)
                 {
-                    return; // Ignore from unknown sender
+                    return;
                 }
 
                 switch (type)
@@ -201,7 +196,7 @@ namespace SmartboardPC
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Network] Dispatch error: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[Network] Dispatch error: {ex.Message}");
             }
         }
 
@@ -216,7 +211,7 @@ namespace SmartboardPC
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Network] Send error: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[Network] Send error: {ex.Message}");
             }
         }
 
@@ -247,12 +242,6 @@ namespace SmartboardPC
             SendToPhone($"{{\"type\":\"page\",\"page\":{page}}}");
         }
 
-        public void SendHello()
-        {
-            SendToPhone("{\"type\":\"hello\",\"device\":\"Smartboard PC\"}");
-        }
-
-        // Get local IPv4 address
         public static string GetLocalIPv4()
         {
             try
@@ -264,7 +253,6 @@ namespace SmartboardPC
             }
             catch
             {
-                // Fallback: get first non-loopback IPv4 address
                 foreach (var ip in Dns.GetHostEntry(Dns.GetHostName()).AddressList)
                 {
                     if (ip.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ip))
@@ -282,11 +270,11 @@ namespace SmartboardPC
     // ==========================================================================
     public class MainWindow : Form
     {
-        private SmartboardCanvas canvas;
-        private FloatingToolbar toolbar;
-        private NetworkManager network;
-        private StatusStrip statusStrip;
-        private ToolStripStatusLabel statusLabel;
+        private SmartboardCanvas? canvas;
+        private FloatingToolbar? toolbar;
+        private NetworkManager? network;
+        private StatusStrip? statusStrip;
+        private ToolStripStatusLabel? statusLabel;
 
         public MainWindow()
         {
@@ -296,7 +284,20 @@ namespace SmartboardPC
             DoubleBuffered = true;
             StartPosition = FormStartPosition.CenterScreen;
 
-            // Initialize network
+            InitializeNetwork();
+            InitializeCanvas();
+            InitializeToolbar();
+            InitializeStatusStrip();
+
+            network?.Start();
+
+            Resize += OnResize!;
+            KeyPreview = true;
+            KeyDown += OnKeyDown!;
+        }
+
+        private void InitializeNetwork()
+        {
             network = new NetworkManager();
             network.PhoneConnected += OnPhoneConnected;
             network.DrawReceived += OnDrawReceived;
@@ -306,46 +307,44 @@ namespace SmartboardPC
             network.ToolReceived += OnToolReceived;
             network.StrokeWidthReceived += OnStrokeWidthReceived;
             network.HelloReceived += OnHelloReceived;
+        }
 
-            // Initialize canvas
+        private void InitializeCanvas()
+        {
+            if (network == null) return;
             canvas = new SmartboardCanvas(network);
             canvas.Dock = DockStyle.Fill;
             canvas.BackColor = Color.FromArgb(0x0B, 0x0C, 0x0E);
+            Controls.Add(canvas);
+        }
 
-            // Initialize toolbar
+        private void InitializeToolbar()
+        {
+            if (canvas == null || network == null) return;
             toolbar = new FloatingToolbar(canvas, network);
             toolbar.Parent = canvas;
+        }
 
-            // Initialize status strip
+        private void InitializeStatusStrip()
+        {
             statusStrip = new StatusStrip();
             statusLabel = new ToolStripStatusLabel("Disconnected");
             statusLabel.ForeColor = Color.Red;
             statusStrip.Items.Add(statusLabel);
             statusStrip.BackColor = Color.FromArgb(28, 30, 34);
-
-            // Layout
-            Controls.Add(canvas);
             Controls.Add(statusStrip);
             statusStrip.BringToFront();
-
-            // Start network
-            network.Start();
-
-            // Resize handler
-            Resize += OnResize;
-
-            // Keyboard shortcuts
-            KeyPreview = true;
-            KeyDown += OnKeyDown;
         }
 
         private void OnResize(object sender, EventArgs e)
         {
-            toolbar.UpdatePosition();
+            toolbar?.UpdatePosition();
         }
 
         private void OnKeyDown(object sender, KeyEventArgs e)
         {
+            if (canvas == null) return;
+
             if (e.Control && e.KeyCode == Keys.Z)
             {
                 canvas.Undo();
@@ -391,48 +390,52 @@ namespace SmartboardPC
 
         private void OnPhoneConnected(string ip)
         {
-            statusLabel.Text = $"Connected: {ip}";
-            statusLabel.ForeColor = Color.FromArgb(0x57, 0xF2, 0x87);
+            if (statusLabel != null)
+            {
+                statusLabel.Text = $"Connected: {ip}";
+                statusLabel.ForeColor = Color.FromArgb(0x57, 0xF2, 0x87);
+            }
+            toolbar?.SetConnectionStatus(true, ip);
         }
 
         private void OnDrawReceived(float x, float y, string state, string tool)
         {
-            canvas.OnDrawPacket(x, y, state, tool);
+            canvas?.OnDrawPacket(x, y, state, tool);
         }
 
         private void OnEraseReceived(string mode, string state, float x, float y)
         {
-            canvas.OnErasePacket(mode, state, x, y);
+            canvas?.OnErasePacket(mode, state, x, y);
         }
 
         private void OnScrollReceived(float dx, float dy)
         {
-            canvas.OnScrollPacket(dx, dy);
+            canvas?.OnScrollPacket(dx, dy);
         }
 
         private void OnZoomReceived(float factor)
         {
-            canvas.ZoomViewport(factor);
+            canvas?.ZoomViewport(factor);
         }
 
         private void OnToolReceived(string tool)
         {
-            canvas.OnToolPacket(tool);
+            canvas?.OnToolPacket(tool);
         }
 
         private void OnStrokeWidthReceived(int width)
         {
-            canvas.CurrentWidth = width;
+            if (canvas != null) canvas.CurrentWidth = width;
         }
 
         private void OnHelloReceived()
         {
-            canvas.PushFullStateToPhone();
+            canvas?.PushFullStateToPhone();
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            network.Stop();
+            network?.Stop();
             base.OnFormClosing(e);
         }
     }
@@ -449,7 +452,7 @@ namespace SmartboardPC
         private const float LASER_FADE_SECONDS = 2.5f;
         private const float PAN_SENSITIVITY = 3.0f;
 
-        private NetworkManager network;
+        private NetworkManager? network;
         private Dictionary<int, Page> pages = new Dictionary<int, Page>();
         private int currentPage = 1;
 
@@ -461,24 +464,19 @@ namespace SmartboardPC
         private Color currentColor = Color.White;
         private float currentWidth = 4.0f;
         private float eraserRadius = 35.0f;
-        private string eraserSizeName = "Medium";
 
-        private Stroke activeStroke;
+        private Stroke? activeStroke;
         private Dictionary<string, Stroke> networkStrokes = new();
         private List<Stroke> fadingStrokes = new();
 
         private PointF? eraseBoxStart = null;
         private RectangleF? activeEraseBox = null;
         private PointF? shapeStart = null;
-        private ShapeItem activeShape = null;
+        private ShapeItem? activeShape = null;
 
         private float dashPhase = 0f;
-        private System.Windows.Forms.Timer fadeTimer;
-        private System.Windows.Forms.Timer dashTimer;
-
-        private PointF? mouseDownPos = null;
-        private bool isDragging = false;
-        private PointF dragStart = PointF.Empty;
+        private System.Windows.Forms.Timer? fadeTimer;
+        private System.Windows.Forms.Timer? dashTimer;
 
         public float CurrentWidth { get => currentWidth; set => currentWidth = value; }
 
@@ -496,7 +494,6 @@ namespace SmartboardPC
                 720f
             );
 
-            // Setup timers - explicitly using System.Windows.Forms.Timer
             fadeTimer = new System.Windows.Forms.Timer();
             fadeTimer.Interval = 50;
             fadeTimer.Tick += (s, e) => TickFade();
@@ -507,20 +504,14 @@ namespace SmartboardPC
             dashTimer.Tick += (s, e) => { dashPhase = (dashPhase + 2) % 32; Invalidate(); };
             dashTimer.Start();
 
-            MouseDown += OnMouseDown;
-            MouseMove += OnMouseMove;
-            MouseUp += OnMouseUp;
-            MouseWheel += OnMouseWheel;
+            MouseDown += OnMouseDown!;
+            MouseMove += OnMouseMove!;
+            MouseUp += OnMouseUp!;
+            MouseWheel += OnMouseWheel!;
 
             BackColor = Color.FromArgb(0x0B, 0x0C, 0x0E);
         }
 
-        // [Rest of SmartboardCanvas methods remain the same as previous code]
-        // ... (I'll include the full code in the final version)
-
-        // ======================================================================
-        // COORDINATE TRANSFORMS
-        // ======================================================================
         private float FitScale()
         {
             if (Width <= 0 || Height <= 0) return 0.0001f;
@@ -549,13 +540,6 @@ namespace SmartboardPC
             return new PointF(pt.X * s + off.X, pt.Y * s + off.Y);
         }
 
-        private RectangleF CanvasRectToScreen(RectangleF r)
-        {
-            PointF tl = CanvasToScreen(new PointF(r.X, r.Y));
-            float s = FitScale();
-            return new RectangleF(tl.X, tl.Y, r.Width * s, r.Height * s);
-        }
-
         private PointF PhoneNormToCanvas(float nx, float ny)
         {
             return new PointF(
@@ -564,9 +548,6 @@ namespace SmartboardPC
             );
         }
 
-        // ======================================================================
-        // NETWORK PACKET HANDLERS
-        // ======================================================================
         public void OnDrawPacket(float x, float y, string state, string tool)
         {
             PointF pt = PhoneNormToCanvas(x, y);
@@ -671,15 +652,12 @@ namespace SmartboardPC
 
         public void PushFullStateToPhone()
         {
-            network.SendPage(currentPage);
-            network.SendToolChange(currentTool);
-            network.SendStrokeWidth((int)currentWidth);
-            network.SendViewport(viewportRect.X, viewportRect.Y, viewportRect.Width, viewportRect.Height, true);
+            network?.SendPage(currentPage);
+            network?.SendToolChange(currentTool);
+            network?.SendStrokeWidth((int)currentWidth);
+            network?.SendViewport(viewportRect.X, viewportRect.Y, viewportRect.Width, viewportRect.Height, true);
         }
 
-        // ======================================================================
-        // STROKE LIFECYCLE
-        // ======================================================================
         private void FinalizeStroke(Stroke stroke)
         {
             if (stroke.Points.Count < 2) return;
@@ -709,7 +687,7 @@ namespace SmartboardPC
             if (fadingStrokes.Count == 0) return;
 
             float now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000f;
-            Page page = pages.TryGetValue(currentPage, out var p) ? p : null;
+            Page? page = pages.TryGetValue(currentPage, out var p) ? p : null;
 
             List<Stroke> stillFading = new();
             bool changed = false;
@@ -737,9 +715,6 @@ namespace SmartboardPC
             if (changed) Invalidate();
         }
 
-        // ======================================================================
-        // ERASE FUNCTIONS
-        // ======================================================================
         private void EraseStrokeNear(PointF canvasPt)
         {
             float radiusSq = eraserRadius * eraserRadius;
@@ -844,9 +819,6 @@ namespace SmartboardPC
             return result;
         }
 
-        // ======================================================================
-        // VIEWPORT CONTROLS
-        // ======================================================================
         private void PanViewport(float dx, float dy)
         {
             float nx = Math.Clamp(viewportRect.X + dx, 0, CANVAS_W - viewportRect.Width);
@@ -857,17 +829,14 @@ namespace SmartboardPC
 
         private void NotifyViewportChange()
         {
-            network.SendViewport(viewportRect.X, viewportRect.Y, viewportRect.Width, viewportRect.Height);
+            network?.SendViewport(viewportRect.X, viewportRect.Y, viewportRect.Width, viewportRect.Height);
             Invalidate();
         }
 
-        // ======================================================================
-        // TOOL / PAGE MANAGEMENT
-        // ======================================================================
         public void SetTool(string tool)
         {
             currentTool = tool;
-            network.SendToolChange(tool);
+            network?.SendToolChange(tool);
         }
 
         public void Undo()
@@ -915,13 +884,10 @@ namespace SmartboardPC
             int newNum = pages.Keys.Max() + 1;
             pages[newNum] = new Page();
             currentPage = newNum;
-            network.SendPage(currentPage);
+            network?.SendPage(currentPage);
             Invalidate();
         }
 
-        // ======================================================================
-        // MOUSE HANDLERS
-        // ======================================================================
         private void OnMouseDown(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
@@ -962,7 +928,6 @@ namespace SmartboardPC
                 activeEraseBox = new RectangleF(pt, new SizeF(0, 0));
             }
 
-            mouseDownPos = new PointF(e.X, e.Y);
             Invalidate();
         }
 
@@ -1013,7 +978,6 @@ namespace SmartboardPC
                 eraseBoxStart = null;
             }
 
-            mouseDownPos = null;
             Invalidate();
         }
 
@@ -1060,9 +1024,6 @@ namespace SmartboardPC
             );
         }
 
-        // ======================================================================
-        // PAINT EVENT
-        // ======================================================================
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
@@ -1086,11 +1047,6 @@ namespace SmartboardPC
 
             if (!pages.TryGetValue(currentPage, out Page page))
                 page = new Page();
-
-            foreach (var img in page.Images)
-            {
-                g.DrawImage(img.Pixmap, img.Rect);
-            }
 
             foreach (var shape in page.Shapes)
                 DrawShape(g, shape);
@@ -1227,7 +1183,6 @@ namespace SmartboardPC
             }
             else if (stroke.Tool == "paint_brush")
             {
-                // DASHED LINE - Square root scaling for natural growth
                 float w = stroke.BaseWidth;
                 float dashLen = Math.Max(10f, 22f * (float)Math.Sqrt(w));
                 float gapLen = Math.Max(5f, 11f * (float)Math.Sqrt(w));
@@ -1391,31 +1346,15 @@ namespace SmartboardPC
     }
 
     // ==========================================================================
-    // FLOATING TOOLBAR - With Phone Icon
+    // FLOATING TOOLBAR
     // ==========================================================================
     public class FloatingToolbar : UserControl
     {
-        private SmartboardCanvas canvas;
-        private NetworkManager network;
-        private FlowLayoutPanel panel;
-        private Dictionary<string, ToolButton> toolButtons = new();
-        private ToolButton penButton;
-        private ToolButton paintBrushButton;
-        private ToolButton fountainPenButton;
-        private ToolButton laserButton;
-        private ToolButton eraserButton;
-        private ToolButton selectButton;
-        private ToolButton shapesButton;
-        private ToolButton undoButton;
-        private ToolButton redoButton;
-        private ToolButton clearButton;
-        private ToolButton noteButton;
-        private ToolButton backgroundButton;
-        private ToolButton exportButton;
-        private Label pageLabel;
-        private ToolButton prevPageButton;
-        private ToolButton nextPageButton;
-        private ToolButton phoneButton;  // Phone icon instead of dot
+        private SmartboardCanvas? canvas;
+        private NetworkManager? network;
+        private FlowLayoutPanel? panel;
+        private ToolButton? phoneButton;
+        private Label? pageLabel;
 
         public FloatingToolbar(SmartboardCanvas canvas, NetworkManager network)
         {
@@ -1445,15 +1384,15 @@ namespace SmartboardPC
                 }
             };
 
-            // Listen for connection changes to update phone icon
             network.PhoneConnected += (ip) => UpdatePhoneIcon(true, ip);
-            // Also update if connection lost (we'll handle this via status check)
         }
 
         private void CreateButtons()
         {
+            if (panel == null || canvas == null || network == null) return;
+
             // Page controls
-            prevPageButton = CreateButton("\u25C0", "Previous Page", () => { /* Implement page navigation */ });
+            var prevPageButton = CreateButton("\u25C0", "Previous Page", () => { });
             panel.Controls.Add(prevPageButton);
 
             pageLabel = new Label();
@@ -1463,68 +1402,67 @@ namespace SmartboardPC
             pageLabel.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
             pageLabel.AutoSize = true;
             pageLabel.Padding = new Padding(8, 4, 8, 4);
-            pageLabel.MouseClick += (s, e) => { /* Show page selector */ };
             panel.Controls.Add(pageLabel);
 
-            nextPageButton = CreateButton("\u25B6", "Next Page", () => { /* Implement page navigation */ });
+            var nextPageButton = CreateButton("\u25B6", "Next Page", () => { });
             panel.Controls.Add(nextPageButton);
 
             panel.Controls.Add(CreateSeparator());
 
             // Undo/Redo
-            undoButton = CreateButton("\u21A9", "Undo (Ctrl+Z)", () => canvas.Undo());
+            var undoButton = CreateButton("\u21A9", "Undo (Ctrl+Z)", () => canvas.Undo());
             panel.Controls.Add(undoButton);
-            redoButton = CreateButton("\u21AA", "Redo (Ctrl+Y)", () => canvas.Redo());
+            var redoButton = CreateButton("\u21AA", "Redo (Ctrl+Y)", () => canvas.Redo());
             panel.Controls.Add(redoButton);
 
             panel.Controls.Add(CreateSeparator());
 
             // Tools
-            penButton = CreateButton("\u270E", "Pen", () => canvas.SetTool("pen"), true);
+            var penButton = CreateButton("\u270E", "Pen", () => canvas.SetTool("pen"), true);
             panel.Controls.Add(penButton);
-            
-            // Paint Brush -> Now "Dash Pen"
-            paintBrushButton = CreateButton("\uD83E\uDD8C", "Dash Pen", () => canvas.SetTool("paint_brush"));
+
+            var paintBrushButton = CreateButton("\uD83E\uDD8C", "Dash Pen", () => canvas.SetTool("paint_brush"));
             panel.Controls.Add(paintBrushButton);
-            
-            fountainPenButton = CreateButton("\uD83D\uDD8B", "Fountain Pen", () => canvas.SetTool("fountain_pen"));
+
+            var fountainPenButton = CreateButton("\uD83D\uDD8B", "Fountain Pen", () => canvas.SetTool("fountain_pen"));
             panel.Controls.Add(fountainPenButton);
-            laserButton = CreateButton("\u26A1", "Laser (Fades)", () => canvas.SetTool("laser"));
+
+            var laserButton = CreateButton("\u26A1", "Laser (Fades)", () => canvas.SetTool("laser"));
             panel.Controls.Add(laserButton);
 
             panel.Controls.Add(CreateSeparator());
 
             // Shapes
-            shapesButton = CreateButton("\u25AD", "Shapes", () => canvas.SetTool("rectangle"));
+            var shapesButton = CreateButton("\u25AD", "Shapes", () => canvas.SetTool("rectangle"));
             panel.Controls.Add(shapesButton);
 
             panel.Controls.Add(CreateSeparator());
 
             // Eraser
-            eraserButton = CreateButton("\u2422", "Eraser", () => canvas.SetTool("eraser_stroke"));
+            var eraserButton = CreateButton("\u2422", "Eraser", () => canvas.SetTool("eraser_stroke"));
             panel.Controls.Add(eraserButton);
 
             panel.Controls.Add(CreateSeparator());
 
             // Clear / Note
-            clearButton = CreateButton("\uD83D\uDDD1", "Clear Page", () => canvas.ClearCurrentPage());
+            var clearButton = CreateButton("\uD83D\uDDD1", "Clear Page", () => canvas.ClearCurrentPage());
             panel.Controls.Add(clearButton);
-            noteButton = CreateButton("\uD83D\uDCDD", "Add Sticky Note", () => { /* Add note */ });
+            var noteButton = CreateButton("\uD83D\uDCDD", "Add Sticky Note", () => { });
             panel.Controls.Add(noteButton);
 
             panel.Controls.Add(CreateSeparator());
 
             // Background
-            backgroundButton = CreateButton("\u25A3", "Board Background", () => { /* Show background picker */ });
+            var backgroundButton = CreateButton("\u25A3", "Board Background", () => { });
             panel.Controls.Add(backgroundButton);
 
             panel.Controls.Add(CreateSeparator());
 
             // Export
-            exportButton = CreateButton("\uD83D\uDDBC", "Export", () => { /* Export dialog */ });
+            var exportButton = CreateButton("\uD83D\uDDBC", "Export", () => { });
             panel.Controls.Add(exportButton);
 
-            // Phone icon instead of dot
+            // Phone button
             phoneButton = CreatePhoneButton();
             panel.Controls.Add(phoneButton);
         }
@@ -1532,26 +1470,22 @@ namespace SmartboardPC
         private ToolButton CreatePhoneButton()
         {
             var btn = new ToolButton();
-            btn.Text = "\uD83D\uDCF1";  // Phone icon
+            btn.Text = "\uD83D\uDCF1";
             btn.Font = new Font("Segoe UI Emoji", 14f);
-            btn.ForeColor = Color.FromArgb(0x72, 0x76, 0x7D);  // Gray (disconnected)
+            btn.ForeColor = Color.FromArgb(0x72, 0x76, 0x7D);
             btn.FlatStyle = FlatStyle.Flat;
             btn.FlatAppearance.BorderSize = 0;
-            btn.FlatAppearance.CheckedBackColor = Color.Transparent;
             btn.Size = new Size(36, 36);
             btn.Padding = new Padding(0);
             btn.Margin = new Padding(2);
             btn.Cursor = Cursors.Hand;
             btn.BackColor = Color.Transparent;
-
-            // Tooltip shows connection status
             btn.ToolTipText = "No phone connected";
 
-            // Click: Show IP address
             btn.Click += (s, e) =>
             {
                 string ip = NetworkManager.GetLocalIPv4();
-                string status = network.PhoneIp != null ? $"Connected to: {network.PhoneIp}" : "Disconnected";
+                string status = network?.PhoneIp != null ? $"Connected to: {network.PhoneIp}" : "Disconnected";
                 MessageBox.Show(
                     $"PC IP Address: {ip}\n\n{status}\n\nUse this IP to connect from your phone.",
                     "SmartBoard Connection Info",
@@ -1560,7 +1494,6 @@ namespace SmartboardPC
                 );
             };
 
-            // Hover effects
             btn.MouseEnter += (s, e) => { btn.BackColor = Color.FromArgb(30, 255, 255, 255); };
             btn.MouseLeave += (s, e) => { btn.BackColor = Color.Transparent; };
 
@@ -1573,12 +1506,12 @@ namespace SmartboardPC
 
             if (connected)
             {
-                phoneButton.ForeColor = Color.FromArgb(0x57, 0xF2, 0x87);  // Green
+                phoneButton.ForeColor = Color.FromArgb(0x57, 0xF2, 0x87);
                 phoneButton.ToolTipText = $"Connected to: {ip}";
             }
             else
             {
-                phoneButton.ForeColor = Color.FromArgb(0xFF, 0x5C, 0x5C);  // Red
+                phoneButton.ForeColor = Color.FromArgb(0xFF, 0x5C, 0x5C);
                 phoneButton.ToolTipText = "No phone connected";
             }
         }
@@ -1588,8 +1521,6 @@ namespace SmartboardPC
             var btn = new ToolButton();
             btn.Text = text;
             btn.ToolTipText = tooltip;
-            btn.CheckOnClick = true;
-            btn.Checked = checkedState;
             btn.Click += (s, e) => onClick?.Invoke();
             btn.BackColor = Color.Transparent;
             btn.ForeColor = Color.FromArgb(0xE4, 0xE6, 0xEB);
@@ -1602,8 +1533,13 @@ namespace SmartboardPC
             btn.Margin = new Padding(2);
             btn.Cursor = Cursors.Hand;
 
-            btn.MouseEnter += (s, e) => { btn.BackColor = Color.FromArgb(30, 255, 255, 255); };
-            btn.MouseLeave += (s, e) => { btn.BackColor = Color.Transparent; };
+            if (checkedState)
+            {
+                btn.BackColor = Color.FromArgb(0x58, 0x65, 0xF2);
+            }
+
+            btn.MouseEnter += (s, e) => { if (!checkedState) btn.BackColor = Color.FromArgb(30, 255, 255, 255); };
+            btn.MouseLeave += (s, e) => { if (!checkedState) btn.BackColor = Color.Transparent; };
 
             return btn;
         }
@@ -1629,7 +1565,7 @@ namespace SmartboardPC
 
         public void SetPageLabel(int pageNum)
         {
-            pageLabel.Text = $"Page {pageNum}";
+            if (pageLabel != null) pageLabel.Text = $"Page {pageNum}";
         }
 
         public void SetConnectionStatus(bool connected, string ip = "")
@@ -1643,9 +1579,9 @@ namespace SmartboardPC
     // ==========================================================================
     public class ToolButton : Button
     {
-        private string tooltipText = "";
+        private string? tooltipText = "";
 
-        public string ToolTipText
+        public string? ToolTipText
         {
             get => tooltipText;
             set { tooltipText = value; }
@@ -1667,8 +1603,8 @@ namespace SmartboardPC
     // ==========================================================================
     public class Stroke
     {
-        public string Id { get; set; }
-        public string Tool { get; set; }
+        public string Id { get; set; } = string.Empty;
+        public string Tool { get; set; } = string.Empty;
         public Color Color { get; set; }
         public float BaseWidth { get; set; }
         public List<StrokePoint> Points { get; set; } = new();
@@ -1688,8 +1624,8 @@ namespace SmartboardPC
 
     public class ShapeItem
     {
-        public string Id { get; set; }
-        public string ShapeType { get; set; }
+        public string Id { get; set; } = string.Empty;
+        public string ShapeType { get; set; } = string.Empty;
         public Color Color { get; set; }
         public float Width { get; set; }
         public PointF Start { get; set; }
@@ -1699,15 +1635,15 @@ namespace SmartboardPC
 
     public class ImageItem
     {
-        public string Id { get; set; }
-        public Image Pixmap { get; set; }
+        public string Id { get; set; } = string.Empty;
+        public Image? Pixmap { get; set; }
         public RectangleF Rect { get; set; }
         public int Layer { get; set; } = 0;
     }
 
     public class StickyNoteData
     {
-        public string Id { get; set; }
+        public string Id { get; set; } = string.Empty;
         public RectangleF Rect { get; set; }
         public string Text { get; set; } = "";
         public string Color { get; set; } = "#FFF7B2";
@@ -1750,8 +1686,8 @@ namespace SmartboardPC
 
     public class Command
     {
-        private Action undoAction;
-        private Action redoAction;
+        private Action? undoAction;
+        private Action? redoAction;
 
         public Command(Action undo, Action redo)
         {
