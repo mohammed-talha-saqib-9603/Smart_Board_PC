@@ -337,12 +337,12 @@ namespace SmartboardPC
             statusStrip.BringToFront();
         }
 
-        private void OnResize(object sender, EventArgs e)
+        private void OnResize(object? sender, EventArgs e)
         {
             toolbar?.UpdatePosition();
         }
 
-        private void OnKeyDown(object sender, KeyEventArgs e)
+        private void OnKeyDown(object? sender, KeyEventArgs e)
         {
             if (canvas == null) return;
 
@@ -461,7 +461,7 @@ namespace SmartboardPC
         private bool gridEnabled = false;
 
         private RectangleF viewportRect;
-        private string currentTool = "pen" ?? throw new InvalidOperationException();
+        private string currentTool = "pen";
         private Color currentColor = Color.White;
         private float currentWidth = 4.0f;
         private float eraserRadius = 35.0f;
@@ -736,7 +736,7 @@ namespace SmartboardPC
 
         private bool ApplyEraseMask(Func<StrokePoint, bool> shouldErase)
         {
-            if (!pages.TryGetValue(currentPage, out Page page)) return false;
+            if (!pages.TryGetValue(currentPage, out Page? page) || page == null) return false;
 
             List<Stroke> removedOriginals = new();
             List<Stroke> addedSegments = new();
@@ -842,7 +842,7 @@ namespace SmartboardPC
 
         public void Undo()
         {
-            if (pages.TryGetValue(currentPage, out Page page))
+            if (pages.TryGetValue(currentPage, out Page? page) && page != null)
             {
                 page.Undo();
                 Invalidate();
@@ -851,7 +851,7 @@ namespace SmartboardPC
 
         public void Redo()
         {
-            if (pages.TryGetValue(currentPage, out Page page))
+            if (pages.TryGetValue(currentPage, out Page? page) && page != null)
             {
                 page.Redo();
                 Invalidate();
@@ -860,7 +860,7 @@ namespace SmartboardPC
 
         public void ClearCurrentPage()
         {
-            if (!pages.TryGetValue(currentPage, out Page page)) return;
+            if (!pages.TryGetValue(currentPage, out Page? page) || page == null) return;
 
             var oldStrokes = new List<Stroke>(page.Strokes);
             var oldShapes = new List<ShapeItem>(page.Shapes);
@@ -889,7 +889,7 @@ namespace SmartboardPC
             Invalidate();
         }
 
-        private void OnMouseDown(object sender, MouseEventArgs e)
+        private void OnMouseDown(object? sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
 
@@ -932,7 +932,7 @@ namespace SmartboardPC
             Invalidate();
         }
 
-        private void OnMouseMove(object sender, MouseEventArgs e)
+        private void OnMouseMove(object? sender, MouseEventArgs e)
         {
             PointF pt = ScreenToCanvas(new PointF(e.X, e.Y));
 
@@ -957,7 +957,7 @@ namespace SmartboardPC
             }
         }
 
-        private void OnMouseUp(object sender, MouseEventArgs e)
+        private void OnMouseUp(object? sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
 
@@ -982,7 +982,7 @@ namespace SmartboardPC
             Invalidate();
         }
 
-        private void OnMouseWheel(object sender, MouseEventArgs e)
+        private void OnMouseWheel(object? sender, MouseEventArgs e)
         {
             float dx = 0, dy = e.Delta > 0 ? -120 : 120;
 
@@ -1009,7 +1009,7 @@ namespace SmartboardPC
 
             page.PushCommand(new Command(
                 undo: () => { if (page.Shapes.Contains(shape)) page.Shapes.Remove(shape); Invalidate(); },
-                redo: () => { page.Shapes.Add(shape); Invalidate(); }
+                redo: () => { page.Shapes.Add(shape); }
             ));
 
             Invalidate();
@@ -1046,7 +1046,7 @@ namespace SmartboardPC
             g.TranslateTransform(off.X, off.Y);
             g.ScaleTransform(s, s);
 
-            if (!pages.TryGetValue(currentPage, out Page page))
+            if (!pages.TryGetValue(currentPage, out Page? page) || page == null)
                 page = new Page();
 
             foreach (var shape in page.Shapes)
@@ -1580,11 +1580,12 @@ namespace SmartboardPC
     public class ToolButton : Button
     {
         private string? tooltipText = "";
+        private ToolTip? tooltip;
 
         public string? ToolTipText
         {
             get => tooltipText;
-            set { tooltipText = value; }
+            set => tooltipText = value;
         }
 
         protected override void OnMouseHover(EventArgs e)
@@ -1592,9 +1593,18 @@ namespace SmartboardPC
             base.OnMouseHover(e);
             if (!string.IsNullOrEmpty(tooltipText))
             {
-                ToolTip tooltip = new ToolTip();
+                tooltip ??= new ToolTip();
                 tooltip.SetToolTip(this, tooltipText);
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                tooltip?.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 
