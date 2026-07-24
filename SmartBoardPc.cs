@@ -337,12 +337,12 @@ namespace SmartboardPC
             statusStrip.BringToFront();
         }
 
-        private void OnResize(object? sender, EventArgs e)
+        private void OnResize(object sender, EventArgs e)
         {
             toolbar?.UpdatePosition();
         }
 
-        private void OnKeyDown(object? sender, KeyEventArgs e)
+        private void OnKeyDown(object sender, KeyEventArgs e)
         {
             if (canvas == null) return;
 
@@ -467,8 +467,8 @@ namespace SmartboardPC
         private float eraserRadius = 35.0f;
 
         private Stroke? activeStroke;
-        private Dictionary<string, Stroke> networkStrokes = new();
-        private List<Stroke> fadingStrokes = new();
+        private Dictionary<string, Stroke> networkStrokes = new Dictionary<string, Stroke>();
+        private List<Stroke> fadingStrokes = new List<Stroke>();
 
         private PointF? eraseBoxStart = null;
         private RectangleF? activeEraseBox = null;
@@ -555,13 +555,11 @@ namespace SmartboardPC
 
             if (state == "down")
             {
-                Stroke stroke = new Stroke
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    Tool = tool,
-                    Color = Color.FromArgb(currentColor.ToArgb()),
-                    BaseWidth = currentWidth
-                };
+                Stroke stroke = new Stroke();
+                stroke.Id = Guid.NewGuid().ToString();
+                stroke.Tool = tool;
+                stroke.Color = Color.FromArgb(currentColor.ToArgb());
+                stroke.BaseWidth = currentWidth;
                 stroke.Points.Add(new StrokePoint { X = pt.X, Y = pt.Y, T = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000f });
                 networkStrokes[stroke.Id] = stroke;
                 activeStroke = stroke;
@@ -690,7 +688,7 @@ namespace SmartboardPC
             float now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000f;
             Page? page = pages.TryGetValue(currentPage, out var p) ? p : null;
 
-            List<Stroke> stillFading = new();
+            List<Stroke> stillFading = new List<Stroke>();
             bool changed = false;
 
             foreach (var s in fadingStrokes)
@@ -736,11 +734,11 @@ namespace SmartboardPC
 
         private bool ApplyEraseMask(Func<StrokePoint, bool> shouldErase)
         {
-            if (!pages.TryGetValue(currentPage, out Page? page) || page == null) return false;
+            if (!pages.TryGetValue(currentPage, out Page page)) return false;
 
-            List<Stroke> removedOriginals = new();
-            List<Stroke> addedSegments = new();
-            List<Stroke> untouched = new();
+            List<Stroke> removedOriginals = new List<Stroke>();
+            List<Stroke> addedSegments = new List<Stroke>();
+            List<Stroke> untouched = new List<Stroke>();
             bool changed = false;
 
             foreach (var stroke in page.Strokes)
@@ -779,8 +777,8 @@ namespace SmartboardPC
 
         private List<Stroke> SplitStrokeByKeepMask(Stroke stroke, List<bool> keepMask)
         {
-            List<Stroke> result = new();
-            List<StrokePoint> current = new();
+            List<Stroke> result = new List<Stroke>();
+            List<StrokePoint> current = new List<StrokePoint>();
 
             for (int i = 0; i < stroke.Points.Count; i++)
             {
@@ -791,31 +789,33 @@ namespace SmartboardPC
                 else
                 {
                     if (current.Count >= 2)
-                        result.Add(new Stroke
-                        {
-                            Id = Guid.NewGuid().ToString(),
-                            Tool = stroke.Tool,
-                            Color = Color.FromArgb(stroke.Color.ToArgb()),
-                            BaseWidth = stroke.BaseWidth,
-                            Points = new List<StrokePoint>(current),
-                            Created = stroke.Created,
-                            Layer = stroke.Layer
-                        });
-                    current = new();
+                    {
+                        Stroke newStroke = new Stroke();
+                        newStroke.Id = Guid.NewGuid().ToString();
+                        newStroke.Tool = stroke.Tool;
+                        newStroke.Color = Color.FromArgb(stroke.Color.ToArgb());
+                        newStroke.BaseWidth = stroke.BaseWidth;
+                        newStroke.Points = new List<StrokePoint>(current);
+                        newStroke.Created = stroke.Created;
+                        newStroke.Layer = stroke.Layer;
+                        result.Add(newStroke);
+                    }
+                    current = new List<StrokePoint>();
                 }
             }
 
             if (current.Count >= 2)
-                result.Add(new Stroke
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    Tool = stroke.Tool,
-                    Color = Color.FromArgb(stroke.Color.ToArgb()),
-                    BaseWidth = stroke.BaseWidth,
-                    Points = new List<StrokePoint>(current),
-                    Created = stroke.Created,
-                    Layer = stroke.Layer
-                });
+            {
+                Stroke newStroke = new Stroke();
+                newStroke.Id = Guid.NewGuid().ToString();
+                newStroke.Tool = stroke.Tool;
+                newStroke.Color = Color.FromArgb(stroke.Color.ToArgb());
+                newStroke.BaseWidth = stroke.BaseWidth;
+                newStroke.Points = new List<StrokePoint>(current);
+                newStroke.Created = stroke.Created;
+                newStroke.Layer = stroke.Layer;
+                result.Add(newStroke);
+            }
 
             return result;
         }
@@ -842,7 +842,7 @@ namespace SmartboardPC
 
         public void Undo()
         {
-            if (pages.TryGetValue(currentPage, out Page? page) && page != null)
+            if (pages.TryGetValue(currentPage, out Page page))
             {
                 page.Undo();
                 Invalidate();
@@ -851,7 +851,7 @@ namespace SmartboardPC
 
         public void Redo()
         {
-            if (pages.TryGetValue(currentPage, out Page? page) && page != null)
+            if (pages.TryGetValue(currentPage, out Page page))
             {
                 page.Redo();
                 Invalidate();
@@ -860,7 +860,7 @@ namespace SmartboardPC
 
         public void ClearCurrentPage()
         {
-            if (!pages.TryGetValue(currentPage, out Page? page) || page == null) return;
+            if (!pages.TryGetValue(currentPage, out Page page)) return;
 
             var oldStrokes = new List<Stroke>(page.Strokes);
             var oldShapes = new List<ShapeItem>(page.Shapes);
@@ -889,7 +889,7 @@ namespace SmartboardPC
             Invalidate();
         }
 
-        private void OnMouseDown(object? sender, MouseEventArgs e)
+        private void OnMouseDown(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
 
@@ -897,27 +897,23 @@ namespace SmartboardPC
 
             if (new[] { "pen", "fountain_pen", "paint_brush", "laser" }.Contains(currentTool))
             {
-                activeStroke = new Stroke
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    Tool = currentTool,
-                    Color = Color.FromArgb(currentColor.ToArgb()),
-                    BaseWidth = currentWidth
-                };
+                activeStroke = new Stroke();
+                activeStroke.Id = Guid.NewGuid().ToString();
+                activeStroke.Tool = currentTool;
+                activeStroke.Color = Color.FromArgb(currentColor.ToArgb());
+                activeStroke.BaseWidth = currentWidth;
                 activeStroke.Points.Add(new StrokePoint { X = pt.X, Y = pt.Y, T = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000f });
             }
             else if (new[] { "rectangle", "circle", "arrow", "line" }.Contains(currentTool))
             {
                 shapeStart = pt;
-                activeShape = new ShapeItem
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    ShapeType = currentTool,
-                    Color = Color.FromArgb(currentColor.ToArgb()),
-                    Width = currentWidth,
-                    Start = pt,
-                    End = pt
-                };
+                activeShape = new ShapeItem();
+                activeShape.Id = Guid.NewGuid().ToString();
+                activeShape.ShapeType = currentTool;
+                activeShape.Color = Color.FromArgb(currentColor.ToArgb());
+                activeShape.Width = currentWidth;
+                activeShape.Start = pt;
+                activeShape.End = pt;
             }
             else if (currentTool == "eraser_stroke")
             {
@@ -932,7 +928,7 @@ namespace SmartboardPC
             Invalidate();
         }
 
-        private void OnMouseMove(object? sender, MouseEventArgs e)
+        private void OnMouseMove(object sender, MouseEventArgs e)
         {
             PointF pt = ScreenToCanvas(new PointF(e.X, e.Y));
 
@@ -957,7 +953,7 @@ namespace SmartboardPC
             }
         }
 
-        private void OnMouseUp(object? sender, MouseEventArgs e)
+        private void OnMouseUp(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
 
@@ -982,7 +978,7 @@ namespace SmartboardPC
             Invalidate();
         }
 
-        private void OnMouseWheel(object? sender, MouseEventArgs e)
+        private void OnMouseWheel(object sender, MouseEventArgs e)
         {
             float dx = 0, dy = e.Delta > 0 ? -120 : 120;
 
@@ -1009,7 +1005,7 @@ namespace SmartboardPC
 
             page.PushCommand(new Command(
                 undo: () => { if (page.Shapes.Contains(shape)) page.Shapes.Remove(shape); Invalidate(); },
-                redo: () => { page.Shapes.Add(shape); }
+                redo: () => { page.Shapes.Add(shape); Invalidate(); }
             ));
 
             Invalidate();
@@ -1046,7 +1042,7 @@ namespace SmartboardPC
             g.TranslateTransform(off.X, off.Y);
             g.ScaleTransform(s, s);
 
-            if (!pages.TryGetValue(currentPage, out Page? page) || page == null)
+            if (!pages.TryGetValue(currentPage, out Page page))
                 page = new Page();
 
             foreach (var shape in page.Shapes)
@@ -1206,7 +1202,7 @@ namespace SmartboardPC
                 float maxW = baseW * 1.5f;
                 float nibAngle = 45f * (float)Math.PI / 180f;
 
-                List<float> widths = new();
+                List<float> widths = new List<float>();
                 for (int i = 0; i < pts.Count; i++)
                 {
                     if (i < pts.Count - 1)
@@ -1223,7 +1219,7 @@ namespace SmartboardPC
                     }
                 }
 
-                List<float> smoothedWidths = new();
+                List<float> smoothedWidths = new List<float>();
                 for (int i = 0; i < widths.Count; i++)
                 {
                     int start = Math.Max(0, i - 3);
@@ -1580,12 +1576,11 @@ namespace SmartboardPC
     public class ToolButton : Button
     {
         private string? tooltipText = "";
-        private ToolTip? tooltip;
 
         public string? ToolTipText
         {
             get => tooltipText;
-            set => tooltipText = value;
+            set { tooltipText = value; }
         }
 
         protected override void OnMouseHover(EventArgs e)
@@ -1593,18 +1588,9 @@ namespace SmartboardPC
             base.OnMouseHover(e);
             if (!string.IsNullOrEmpty(tooltipText))
             {
-                tooltip ??= new ToolTip();
+                ToolTip tooltip = new ToolTip();
                 tooltip.SetToolTip(this, tooltipText);
             }
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                tooltip?.Dispose();
-            }
-            base.Dispose(disposing);
         }
     }
 
@@ -1613,11 +1599,11 @@ namespace SmartboardPC
     // ==========================================================================
     public class Stroke
     {
-        public string Id { get; set; } = string.Empty;
-        public string Tool { get; set; } = string.Empty;
+        public string Id { get; set; } = "";
+        public string Tool { get; set; } = "";
         public Color Color { get; set; }
         public float BaseWidth { get; set; }
-        public List<StrokePoint> Points { get; set; } = new();
+        public List<StrokePoint> Points { get; set; } = new List<StrokePoint>();
         public float Created { get; set; } = (float)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
         public float? FadeStart { get; set; }
         public float Opacity { get; set; } = 1.0f;
@@ -1634,8 +1620,8 @@ namespace SmartboardPC
 
     public class ShapeItem
     {
-        public string Id { get; set; } = string.Empty;
-        public string ShapeType { get; set; } = string.Empty;
+        public string Id { get; set; } = "";
+        public string ShapeType { get; set; } = "";
         public Color Color { get; set; }
         public float Width { get; set; }
         public PointF Start { get; set; }
@@ -1645,7 +1631,7 @@ namespace SmartboardPC
 
     public class ImageItem
     {
-        public string Id { get; set; } = string.Empty;
+        public string Id { get; set; } = "";
         public Image? Pixmap { get; set; }
         public RectangleF Rect { get; set; }
         public int Layer { get; set; } = 0;
@@ -1653,7 +1639,7 @@ namespace SmartboardPC
 
     public class StickyNoteData
     {
-        public string Id { get; set; } = string.Empty;
+        public string Id { get; set; } = "";
         public RectangleF Rect { get; set; }
         public string Text { get; set; } = "";
         public string Color { get; set; } = "#FFF7B2";
@@ -1664,12 +1650,12 @@ namespace SmartboardPC
 
     public class Page
     {
-        public List<Stroke> Strokes { get; set; } = new();
-        public List<ShapeItem> Shapes { get; set; } = new();
-        public List<ImageItem> Images { get; set; } = new();
-        public List<StickyNoteData> Notes { get; set; } = new();
-        public Stack<Command> UndoStack { get; set; } = new();
-        public Stack<Command> RedoStack { get; set; } = new();
+        public List<Stroke> Strokes { get; set; } = new List<Stroke>();
+        public List<ShapeItem> Shapes { get; set; } = new List<ShapeItem>();
+        public List<ImageItem> Images { get; set; } = new List<ImageItem>();
+        public List<StickyNoteData> Notes { get; set; } = new List<StickyNoteData>();
+        public Stack<Command> UndoStack { get; set; } = new Stack<Command>();
+        public Stack<Command> RedoStack { get; set; } = new Stack<Command>();
 
         public void PushCommand(Command cmd)
         {
