@@ -11,7 +11,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Threading; 
+using System.Threading;
 using System.Windows.Forms;
 
 namespace SmartboardPC
@@ -461,7 +461,7 @@ namespace SmartboardPC
         private bool gridEnabled = false;
 
         private RectangleF viewportRect;
-        private string currentTool = "pen";
+        private string currentTool = "pen" ?? throw new InvalidOperationException();
         private Color currentColor = Color.White;
         private float currentWidth = 4.0f;
         private float eraserRadius = 35.0f;
@@ -1528,7 +1528,6 @@ namespace SmartboardPC
             btn.Font = new Font("Segoe UI", 12f);
             btn.FlatStyle = FlatStyle.Flat;
             btn.FlatAppearance.BorderSize = 0;
-            btn.FlatAppearance.CheckedBackColor = Color.FromArgb(0x58, 0x65, 0xF2);
             btn.Size = new Size(36, 36);
             btn.Padding = new Padding(0);
             btn.Margin = new Padding(2);
