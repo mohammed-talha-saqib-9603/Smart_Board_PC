@@ -4,14 +4,14 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
+    
+    <!-- Single File Output Settings -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
-    <ApplicationIcon>smartboard.ico</ApplicationIcon>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.0" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="SmartboardPC.cs" />
   </ItemGroup>
 </Project>
