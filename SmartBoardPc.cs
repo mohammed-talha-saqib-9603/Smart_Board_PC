@@ -1,7 +1,5 @@
 // ==============================================================================
-// SMARTBOARD PC - C# NATIVE AOT VERSION
-// ==============================================================================
-// This is a complete rewrite of the Smartboard PC app in C# with Native AOT
+// SMARTBOARD PC - C# NATIVE AOT VERSION (COMPLETE)
 // ==============================================================================
 
 using System;
@@ -34,6 +32,252 @@ namespace SmartboardPC
     }
 
     // ==========================================================================
+    // NETWORK MANAGER - UDP Communication
+    // ==========================================================================
+    public class NetworkManager
+    {
+        private const int PC_LISTEN_PORT = 5005;
+        private const int PHONE_LISTEN_PORT = 5006;
+        private const int MAX_UDP_PACKET_SIZE = 4096;
+
+        private UdpClient? udpClient;
+        private Thread? receiveThread;
+        private volatile bool running = false;
+
+        public string? PhoneIp { get; private set; }
+        public int PhonePort { get; private set; } = PHONE_LISTEN_PORT;
+
+        public event Action<string>? PhoneConnected;
+        public event Action? HelloReceived;
+        public event Action<float, float, string, string>? DrawReceived;
+        public event Action<string, string, float, float>? EraseReceived;
+        public event Action<float, float>? ScrollReceived;
+        public event Action<float>? ZoomReceived;
+        public event Action<string>? ToolReceived;
+        public event Action<int>? StrokeWidthReceived;
+
+        private float lastViewportSend = 0f;
+        private float viewportSendThrottle = 1f / 30f;
+
+        public NetworkManager()
+        {
+            PhonePort = PHONE_LISTEN_PORT;
+        }
+
+        public void Start()
+        {
+            running = true;
+            try
+            {
+                udpClient = new UdpClient(new IPEndPoint(IPAddress.Any, PC_LISTEN_PORT));
+                udpClient.Client.ReceiveTimeout = 500;
+
+                receiveThread = new Thread(ReceiveLoop);
+                receiveThread.IsBackground = true;
+                receiveThread.Start();
+
+                Console.WriteLine($"[Network] Listening on port {PC_LISTEN_PORT}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Network] Error starting: {ex.Message}");
+            }
+        }
+
+        public void Stop()
+        {
+            running = false;
+            try
+            {
+                udpClient?.Close();
+                receiveThread?.Join(1000);
+            }
+            catch { }
+        }
+
+        private void ReceiveLoop()
+        {
+            while (running)
+            {
+                try
+                {
+                    IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
+                    byte[] data = udpClient?.Receive(ref remoteEndPoint) ?? Array.Empty<byte>();
+
+                    if (data.Length > 0)
+                    {
+                        string jsonStr = Encoding.UTF8.GetString(data);
+                        DispatchPacket(jsonStr, remoteEndPoint.Address.ToString(), remoteEndPoint.Port);
+                    }
+                }
+                catch (SocketException)
+                {
+                    // Timeout, continue
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Network] Receive error: {ex.Message}");
+                }
+            }
+        }
+
+        private void DispatchPacket(string jsonStr, string ip, int port)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(jsonStr);
+                var root = doc.RootElement;
+
+                string? type = root.GetProperty("type").GetString();
+
+                if (type == "hello")
+                {
+                    bool isNew = (PhoneIp != ip) || (PhonePort != port);
+                    PhoneIp = ip;
+                    PhonePort = port;
+                    SendToPhone("{\"type\":\"hello_ack\"}");
+
+                    if (isNew)
+                    {
+                        Console.WriteLine($"[Network] Phone (re)connected from {ip}:{port}");
+                        PhoneConnected?.Invoke(ip);
+                    }
+                    HelloReceived?.Invoke();
+                    return;
+                }
+
+                // If no phone registered, adopt sender
+                if (PhoneIp == null)
+                {
+                    PhoneIp = ip;
+                    PhonePort = port;
+                    PhoneConnected?.Invoke(ip);
+                    HelloReceived?.Invoke();
+                }
+                else if (PhoneIp != ip)
+                {
+                    return; // Ignore from unknown sender
+                }
+
+                switch (type)
+                {
+                    case "draw":
+                        float x = (float)root.GetProperty("x").GetDouble();
+                        float y = (float)root.GetProperty("y").GetDouble();
+                        string state = root.GetProperty("state").GetString() ?? "move";
+                        string tool = root.GetProperty("tool").GetString() ?? "pen";
+                        DrawReceived?.Invoke(x, y, state, tool);
+                        break;
+
+                    case "erase":
+                        string mode = root.GetProperty("mode").GetString() ?? "stroke";
+                        string eraseState = root.GetProperty("state").GetString() ?? "move";
+                        float ex = (float)root.GetProperty("x").GetDouble();
+                        float ey = (float)root.GetProperty("y").GetDouble();
+                        EraseReceived?.Invoke(mode, eraseState, ex, ey);
+                        break;
+
+                    case "scroll":
+                        float dx = (float)root.GetProperty("dx").GetDouble();
+                        float dy = (float)root.GetProperty("dy").GetDouble();
+                        ScrollReceived?.Invoke(dx, dy);
+                        break;
+
+                    case "zoom":
+                        float factor = (float)root.GetProperty("factor").GetDouble();
+                        ZoomReceived?.Invoke(factor);
+                        break;
+
+                    case "tool":
+                        string toolName = root.GetProperty("tool").GetString() ?? "";
+                        ToolReceived?.Invoke(toolName);
+                        break;
+
+                    case "stroke_width":
+                        int width = root.GetProperty("width").GetInt32();
+                        StrokeWidthReceived?.Invoke(width);
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Network] Dispatch error: {ex.Message}");
+            }
+        }
+
+        private void SendToPhone(string json)
+        {
+            if (PhoneIp == null || udpClient == null) return;
+
+            try
+            {
+                byte[] data = Encoding.UTF8.GetBytes(json);
+                udpClient.Send(data, data.Length, new IPEndPoint(IPAddress.Parse(PhoneIp), PhonePort));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Network] Send error: {ex.Message}");
+            }
+        }
+
+        public void SendViewport(float vx, float vy, float vw, float vh, bool force = false)
+        {
+            if (PhoneIp == null) return;
+
+            float now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000f;
+            if (!force && (now - lastViewportSend) < viewportSendThrottle) return;
+
+            lastViewportSend = now;
+            string json = $"{{\"type\":\"viewport\",\"vx\":{vx / 3840f},\"vy\":{vy / 2160f},\"vw\":{vw / 3840f},\"vh\":{vh / 2160f}}}";
+            SendToPhone(json);
+        }
+
+        public void SendToolChange(string tool)
+        {
+            SendToPhone($"{{\"type\":\"tool\",\"tool\":\"{tool}\"}}");
+        }
+
+        public void SendStrokeWidth(int width)
+        {
+            SendToPhone($"{{\"type\":\"stroke_width\",\"width\":{width}}}");
+        }
+
+        public void SendPage(int page)
+        {
+            SendToPhone($"{{\"type\":\"page\",\"page\":{page}}}");
+        }
+
+        public void SendHello()
+        {
+            SendToPhone("{\"type\":\"hello\",\"device\":\"Smartboard PC\"}");
+        }
+
+        // Get local IPv4 address
+        public static string GetLocalIPv4()
+        {
+            try
+            {
+                using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
+                socket.Connect("8.8.8.8", 65530);
+                IPEndPoint? endPoint = socket.LocalEndPoint as IPEndPoint;
+                return endPoint?.Address?.ToString() ?? "127.0.0.1";
+            }
+            catch
+            {
+                // Fallback: get first non-loopback IPv4 address
+                foreach (var ip in Dns.GetHostEntry(Dns.GetHostName()).AddressList)
+                {
+                    if (ip.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ip))
+                    {
+                        return ip.ToString();
+                    }
+                }
+                return "127.0.0.1";
+            }
+        }
+    }
+
+    // ==========================================================================
     // MAIN WINDOW
     // ==========================================================================
     public class MainWindow : Form
@@ -46,7 +290,7 @@ namespace SmartboardPC
 
         public MainWindow()
         {
-            Text = "Smartboard PC - C# Native AOT";
+            Text = "SmartBoard";
             Size = new Size(1440, 900);
             BackColor = Color.FromArgb(0x0B, 0x0C, 0x0E);
             DoubleBuffered = true;
@@ -69,7 +313,7 @@ namespace SmartboardPC
             canvas.BackColor = Color.FromArgb(0x0B, 0x0C, 0x0E);
 
             // Initialize toolbar
-            toolbar = new FloatingToolbar(canvas);
+            toolbar = new FloatingToolbar(canvas, network);
             toolbar.Parent = canvas;
 
             // Initialize status strip
@@ -148,7 +392,7 @@ namespace SmartboardPC
         private void OnPhoneConnected(string ip)
         {
             statusLabel.Text = $"Connected: {ip}";
-            statusLabel.ForeColor = Color.FromArgb(0x57, 0xF2, 0x87); // Green
+            statusLabel.ForeColor = Color.FromArgb(0x57, 0xF2, 0x87);
         }
 
         private void OnDrawReceived(float x, float y, string state, string tool)
@@ -229,8 +473,8 @@ namespace SmartboardPC
         private ShapeItem activeShape = null;
 
         private float dashPhase = 0f;
-        private Timer fadeTimer;
-        private Timer dashTimer;
+        private System.Windows.Forms.Timer fadeTimer;
+        private System.Windows.Forms.Timer dashTimer;
 
         private PointF? mouseDownPos = null;
         private bool isDragging = false;
@@ -240,7 +484,6 @@ namespace SmartboardPC
 
         public SmartboardCanvas(NetworkManager network)
         {
-            this.network = network;
             this.network = network;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.DoubleBuffer | ControlStyles.ResizeRedraw, true);
 
@@ -253,13 +496,13 @@ namespace SmartboardPC
                 720f
             );
 
-            // Setup timers
-            fadeTimer = new Timer();
+            // Setup timers - explicitly using System.Windows.Forms.Timer
+            fadeTimer = new System.Windows.Forms.Timer();
             fadeTimer.Interval = 50;
             fadeTimer.Tick += (s, e) => TickFade();
             fadeTimer.Start();
 
-            dashTimer = new Timer();
+            dashTimer = new System.Windows.Forms.Timer();
             dashTimer.Interval = 120;
             dashTimer.Tick += (s, e) => { dashPhase = (dashPhase + 2) % 32; Invalidate(); };
             dashTimer.Start();
@@ -271,6 +514,9 @@ namespace SmartboardPC
 
             BackColor = Color.FromArgb(0x0B, 0x0C, 0x0E);
         }
+
+        // [Rest of SmartboardCanvas methods remain the same as previous code]
+        // ... (I'll include the full code in the final version)
 
         // ======================================================================
         // COORDINATE TRANSFORMS
@@ -376,7 +622,7 @@ namespace SmartboardPC
                     eraseBoxStart = null;
                 }
             }
-            else // stroke mode
+            else
             {
                 if (state == "down" || state == "move")
                 {
@@ -450,7 +696,6 @@ namespace SmartboardPC
                 fadingStrokes.Add(stroke);
             }
 
-            // Add to undo stack
             page.PushCommand(new Command(
                 undo: () => { if (page.Strokes.Contains(stroke)) page.Strokes.Remove(stroke); Invalidate(); },
                 redo: () => { page.Strokes.Add(stroke); Invalidate(); }
@@ -546,7 +791,6 @@ namespace SmartboardPC
 
             page.Strokes = untouched.Concat(addedSegments).ToList();
 
-            // Add to undo stack
             var origCopy = new List<Stroke>(removedOriginals);
             var addedCopy = new List<Stroke>(addedSegments);
             page.PushCommand(new Command(
@@ -825,41 +1069,34 @@ namespace SmartboardPC
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
-            // Fill background
             g.Clear(BackColor);
 
             float s = FitScale();
             PointF off = OriginOffset();
             RectangleF canvasScreenRect = new RectangleF(off.X, off.Y, CANVAS_W * s, CANVAS_H * s);
 
-            // Draw canvas background
             using (var brush = new SolidBrush(bgColor))
                 g.FillRectangle(brush, canvasScreenRect);
 
             if (gridEnabled)
                 DrawGrid(g, canvasScreenRect, s);
 
-            // Transform for canvas coordinates
             g.TranslateTransform(off.X, off.Y);
             g.ScaleTransform(s, s);
 
-            // Get current page
             if (!pages.TryGetValue(currentPage, out Page page))
                 page = new Page();
 
-            // Draw images
             foreach (var img in page.Images)
             {
                 g.DrawImage(img.Pixmap, img.Rect);
             }
 
-            // Draw shapes
             foreach (var shape in page.Shapes)
                 DrawShape(g, shape);
             if (activeShape != null)
                 DrawShape(g, activeShape);
 
-            // Draw strokes
             foreach (var stroke in page.Strokes)
                 if (!stroke.IsErased)
                     DrawStroke(g, stroke);
@@ -868,14 +1105,11 @@ namespace SmartboardPC
             if (activeStroke != null)
                 DrawStroke(g, activeStroke);
 
-            // Draw viewport rect
             DrawViewportRect(g);
 
-            // Draw erase box
             if (activeEraseBox.HasValue)
                 DrawEraseBox(g, activeEraseBox.Value);
 
-            // Draw eraser radius
             if (currentTool == "eraser_stroke")
             {
                 PointF cursorPos = PointToClient(Cursor.Position);
@@ -1011,7 +1245,6 @@ namespace SmartboardPC
             }
             else if (stroke.Tool == "fountain_pen")
             {
-                // Fountain pen - varying width
                 float baseW = stroke.BaseWidth;
                 float minW = baseW * 0.4f;
                 float maxW = baseW * 1.5f;
@@ -1034,7 +1267,6 @@ namespace SmartboardPC
                     }
                 }
 
-                // Smooth widths
                 List<float> smoothedWidths = new();
                 for (int i = 0; i < widths.Count; i++)
                 {
@@ -1044,7 +1276,6 @@ namespace SmartboardPC
                     smoothedWidths.Add(avg);
                 }
 
-                // Draw with varying width
                 using (Pen pen = new Pen(color, smoothedWidths[0]))
                 {
                     pen.StartCap = LineCap.Round;
@@ -1071,7 +1302,6 @@ namespace SmartboardPC
             }
             else
             {
-                // Standard pen
                 using (Pen pen = new Pen(color, stroke.BaseWidth))
                 {
                     pen.StartCap = LineCap.Round;
@@ -1161,11 +1391,12 @@ namespace SmartboardPC
     }
 
     // ==========================================================================
-    // FLOATING TOOLBAR
+    // FLOATING TOOLBAR - With Phone Icon
     // ==========================================================================
     public class FloatingToolbar : UserControl
     {
         private SmartboardCanvas canvas;
+        private NetworkManager network;
         private FlowLayoutPanel panel;
         private Dictionary<string, ToolButton> toolButtons = new();
         private ToolButton penButton;
@@ -1184,11 +1415,12 @@ namespace SmartboardPC
         private Label pageLabel;
         private ToolButton prevPageButton;
         private ToolButton nextPageButton;
-        private Label statusDot;
+        private ToolButton phoneButton;  // Phone icon instead of dot
 
-        public FloatingToolbar(SmartboardCanvas canvas)
+        public FloatingToolbar(SmartboardCanvas canvas, NetworkManager network)
         {
             this.canvas = canvas;
+            this.network = network;
             BackColor = Color.FromArgb(219, 28, 30, 34);
             AutoSize = true;
             AutoSizeMode = AutoSizeMode.GrowAndShrink;
@@ -1202,14 +1434,9 @@ namespace SmartboardPC
 
             Controls.Add(panel);
 
-            // Create buttons
             CreateButtons();
-
-            // Position
             UpdatePosition();
 
-            // Drop shadow effect
-            // In WinForms we can use a simple border
             Paint += (s, e) =>
             {
                 using (Pen pen = new Pen(Color.FromArgb(20, 255, 255, 255), 1))
@@ -1217,6 +1444,10 @@ namespace SmartboardPC
                     e.Graphics.DrawRoundedRectangle(pen, 0, 0, Width - 1, Height - 1, 20);
                 }
             };
+
+            // Listen for connection changes to update phone icon
+            network.PhoneConnected += (ip) => UpdatePhoneIcon(true, ip);
+            // Also update if connection lost (we'll handle this via status check)
         }
 
         private void CreateButtons()
@@ -1251,8 +1482,11 @@ namespace SmartboardPC
             // Tools
             penButton = CreateButton("\u270E", "Pen", () => canvas.SetTool("pen"), true);
             panel.Controls.Add(penButton);
-            paintBrushButton = CreateButton("\uD83E\uDD8C", "Paint Brush", () => canvas.SetTool("paint_brush"));
+            
+            // Paint Brush -> Now "Dash Pen"
+            paintBrushButton = CreateButton("\uD83E\uDD8C", "Dash Pen", () => canvas.SetTool("paint_brush"));
             panel.Controls.Add(paintBrushButton);
+            
             fountainPenButton = CreateButton("\uD83D\uDD8B", "Fountain Pen", () => canvas.SetTool("fountain_pen"));
             panel.Controls.Add(fountainPenButton);
             laserButton = CreateButton("\u26A1", "Laser (Fades)", () => canvas.SetTool("laser"));
@@ -1290,15 +1524,63 @@ namespace SmartboardPC
             exportButton = CreateButton("\uD83D\uDDBC", "Export", () => { /* Export dialog */ });
             panel.Controls.Add(exportButton);
 
-            // Status dot
-            statusDot = new Label();
-            statusDot.Text = "\u25CF";
-            statusDot.ForeColor = Color.FromArgb(0x72, 0x76, 0x7D);
-            statusDot.BackColor = Color.Transparent;
-            statusDot.AutoSize = true;
-            statusDot.Font = new Font("Segoe UI", 14f);
-            statusDot.Padding = new Padding(4, 0, 4, 0);
-            panel.Controls.Add(statusDot);
+            // Phone icon instead of dot
+            phoneButton = CreatePhoneButton();
+            panel.Controls.Add(phoneButton);
+        }
+
+        private ToolButton CreatePhoneButton()
+        {
+            var btn = new ToolButton();
+            btn.Text = "\uD83D\uDCF1";  // Phone icon
+            btn.Font = new Font("Segoe UI Emoji", 14f);
+            btn.ForeColor = Color.FromArgb(0x72, 0x76, 0x7D);  // Gray (disconnected)
+            btn.FlatStyle = FlatStyle.Flat;
+            btn.FlatAppearance.BorderSize = 0;
+            btn.FlatAppearance.CheckedBackColor = Color.Transparent;
+            btn.Size = new Size(36, 36);
+            btn.Padding = new Padding(0);
+            btn.Margin = new Padding(2);
+            btn.Cursor = Cursors.Hand;
+            btn.BackColor = Color.Transparent;
+
+            // Tooltip shows connection status
+            btn.ToolTipText = "No phone connected";
+
+            // Click: Show IP address
+            btn.Click += (s, e) =>
+            {
+                string ip = NetworkManager.GetLocalIPv4();
+                string status = network.PhoneIp != null ? $"Connected to: {network.PhoneIp}" : "Disconnected";
+                MessageBox.Show(
+                    $"PC IP Address: {ip}\n\n{status}\n\nUse this IP to connect from your phone.",
+                    "SmartBoard Connection Info",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+            };
+
+            // Hover effects
+            btn.MouseEnter += (s, e) => { btn.BackColor = Color.FromArgb(30, 255, 255, 255); };
+            btn.MouseLeave += (s, e) => { btn.BackColor = Color.Transparent; };
+
+            return btn;
+        }
+
+        public void UpdatePhoneIcon(bool connected, string ip = "")
+        {
+            if (phoneButton == null) return;
+
+            if (connected)
+            {
+                phoneButton.ForeColor = Color.FromArgb(0x57, 0xF2, 0x87);  // Green
+                phoneButton.ToolTipText = $"Connected to: {ip}";
+            }
+            else
+            {
+                phoneButton.ForeColor = Color.FromArgb(0xFF, 0x5C, 0x5C);  // Red
+                phoneButton.ToolTipText = "No phone connected";
+            }
         }
 
         private ToolButton CreateButton(string text, string tooltip, Action onClick, bool checkedState = false)
@@ -1352,8 +1634,7 @@ namespace SmartboardPC
 
         public void SetConnectionStatus(bool connected, string ip = "")
         {
-            statusDot.ForeColor = connected ? Color.FromArgb(0x57, 0xF2, 0x87) : Color.FromArgb(0x72, 0x76, 0x7D);
-            statusDot.ToolTipText = connected ? $"Phone connected: {ip}" : "No phone connected";
+            UpdatePhoneIcon(connected, ip);
         }
     }
 
