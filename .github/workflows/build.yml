@@ -15,6 +15,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
+    - name: Setup Node.js (for actions)
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'  # Use Node.js 22 to fix deprecation warning
+    
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
@@ -34,25 +39,12 @@ jobs:
           -p:PublishSingleFile=true `
           -p:PublishTrimmed=false `
           -p:PublishReadyToRun=false `
-          -p:DebugType=embedded `
-          -p:DebugSymbols=true `
           --no-build `
           --output ./publish
-      continue-on-error: false
-    
-    - name: List output files (for debugging)
-      run: dir ./publish
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: SmartBoard
-        path: ./publish/SmartBoard.exe
+        path: ./publish/*.exe
         retention-days: 30
-    
-    - name: Upload all publish files (for debugging)
-      uses: actions/upload-artifact@v4
-      with:
-        name: SmartBoard-publish-files
-        path: ./publish/
-        retention-days: 7
